@@ -1,116 +1,325 @@
-![GitHub License](https://img.shields.io/github/license/nikkinikki-org/OpenWrt-nikki?style=for-the-badge&logo=github) ![GitHub Tag](https://img.shields.io/github/v/release/nikkinikki-org/OpenWrt-nikki?style=for-the-badge&logo=github) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/nikkinikki-org/OpenWrt-nikki/total?style=for-the-badge&logo=github) ![GitHub Repo stars](https://img.shields.io/github/stars/nikkinikki-org/OpenWrt-nikki?style=for-the-badge&logo=github) [![Telegram](https://img.shields.io/badge/Telegram-gray?style=for-the-badge&logo=telegram)](https://t.me/nikkinikki_org)
+# Rukiki
 
-English | [中文](README.zh.md)
+Rukiki is an experimental simple-mode interface for [Nikki](https://github.com/nikkinikki-org/OpenWrt-nikki) and Mihomo on OpenWrt.
 
-# Nikki
+The goal is to make split routing understandable for ordinary users:
 
-Transparent Proxy with Mihomo on OpenWrt.
+1. Paste a VPN subscription URL.
+2. Let the router update the subscription automatically.
+3. Let Mihomo select the fastest available node.
+4. Route blocked or unavailable services through VPN.
+5. Keep ordinary traffic direct.
 
-## Prerequisites
+> [!WARNING]
+> Rukiki is in early development.
+> It is not ready for production routers yet.
+> Do not install it on a router that you cannot easily recover.
 
-- OpenWrt >= 24.10
-- Linux Kernel >= 5.13
-- firewall4
+## Project status
 
-## Feature
+Current status: **experimental prototype**.
 
-- Transparent Proxy (Redirect/TPROXY/TUN, IPv4 and/or IPv6)
-- Access Control
-- Profile Mixin
-- Profile Editor
-- Scheduled Restart
+Already implemented:
 
-## Install & Update
+- separate `luci-app-rukiki` package;
+- UCI configuration for simple mode;
+- projection from Rukiki settings to Nikki configuration;
+- automatic proxy groups:
+  - `AUTO`;
+  - `MANUAL`;
+  - `PROXY`;
+- custom domain rules;
+- LuCI page named `Smart VPN`;
+- RPC interface for apply, status, checks and tests;
+- safe apply script with rollback;
+- syntax checks for ucode sources;
+- automated projection tests in GitHub Actions.
 
-### A. Install From Feed (Recommended)
+Not implemented or not validated yet:
 
-1. Add Feed
+- installation package for all target OpenWrt versions;
+- full testing on GL.iNet Flint 2;
+- production-ready DNS profile;
+- automatic Russian blocklists and unavailable-service lists;
+- MRS rule aggregation pipeline;
+- watchdog and health recovery;
+- package migrations;
+- stable release and update channel.
 
-```shell
-# only needs to be run once
-wget -O - https://github.com/nikkinikki-org/OpenWrt-nikki/raw/refs/heads/main/feed.sh | ash
+## Architecture
+
+Rukiki does not replace Nikki.
+
+Nikki remains the owner of the active Mihomo runtime configuration. Rukiki acts as a simple configuration layer that generates the required Nikki inputs.
+
+```text
+LuCI Smart VPN
+      |
+      v
+/etc/config/rukiki
+      |
+      v
+Rukiki generator
+      |
+      +--> Nikki UCI settings
+      |
+      +--> Nikki mixin configuration
+                 |
+                 v
+              Mihomo
 ```
 
-2. Install
+This separation is intentional:
 
-```shell
-# you can install from shell or `Software` menu in LuCI
-# for opkg
-opkg install nikki
-opkg install luci-app-nikki
-opkg install luci-i18n-nikki-zh-cn
-# for apk
-apk add nikki
-apk add luci-app-nikki
-apk add luci-i18n-nikki-zh-cn
+- Nikki keeps control over service startup, networking and nftables;
+- Rukiki only manages the simple user scenario;
+- advanced Nikki functionality remains available;
+- upstream Nikki updates can still be merged into the fork.
+
+## Target user scenario
+
+The intended final workflow is:
+
+1. Open OpenWrt LuCI.
+2. Go to `Smart VPN`.
+3. Paste a subscription URL.
+4. Enable automatic node selection.
+5. Enable smart routing.
+6. Save and start.
+
+The router should then:
+
+- update the subscription automatically;
+- test available nodes;
+- select a working low-latency node;
+- switch nodes after failure;
+- send blocked resources through VPN;
+- send Russian banks, government services and local networks directly;
+- keep all other traffic direct by default.
+
+## Routing model
+
+The planned routing priority is:
+
+```text
+User DIRECT rules
+User VPN rules
+Local networks -> DIRECT
+Russian allowlist -> DIRECT
+Blocked resources -> PROXY
+Unavailable-from-Russia resources -> PROXY
+Optional service categories -> PROXY
+Russian destinations -> DIRECT
+Everything else -> DIRECT
 ```
 
-### B. Install From Release
+User rules must always have higher priority than downloaded lists.
 
-```shell
-wget -O - https://github.com/nikkinikki-org/OpenWrt-nikki/raw/refs/heads/main/install.sh | ash
+## Subscription handling
+
+The subscription is intended to be used as a Nikki/Mihomo proxy provider.
+
+Planned requirements:
+
+- automatic updates;
+- timeout and size limits;
+- redirect handling;
+- validation before apply;
+- preservation of the last working subscription;
+- no replacement with an empty or invalid response;
+- masked secrets in UI and logs;
+- no full subscription URL in diagnostic output.
+
+## Automatic node selection
+
+The generated configuration uses three logical groups:
+
+- `AUTO` uses `url-test` to select the fastest available node;
+- `MANUAL` allows explicit node selection;
+- `PROXY` is the routing target used by rules.
+
+The default intended mode is:
+
+```text
+PROXY -> AUTO
 ```
 
-## Uninstall & Reset
+## Rule lists roadmap
 
-```shell
-wget -O - https://github.com/nikkinikki-org/OpenWrt-nikki/raw/refs/heads/main/uninstall.sh | ash
+The final system should automatically maintain multiple categories of rule sets:
+
+- resources blocked in Russia;
+- resources unavailable from Russian IP addresses;
+- YouTube and Google Video;
+- Discord;
+- AI services;
+- social networks;
+- foreign media services;
+- Russian banks and government-service allowlists;
+- user-defined exclusions.
+
+Candidate data sources include Antizapret, Re:filter, antifilter, ITDog and compatible Mihomo rule-set projects.
+
+No source is treated as absolute truth. Before use, every source must be evaluated for:
+
+- update frequency;
+- accuracy;
+- false positives;
+- format;
+- license;
+- redistribution terms;
+- mirrors;
+- long-term reliability.
+
+The preferred future design is to aggregate and validate lists in GitHub Actions, publish verified MRS files, and let routers download only ready-to-use artifacts.
+
+## Reliability principles
+
+Rukiki is designed around fail-open behaviour for home users.
+
+If VPN configuration fails, ordinary direct internet access should remain available.
+
+Required safeguards:
+
+- validate generated configuration before restart;
+- keep the previous working configuration;
+- apply changes atomically;
+- roll back after failed startup;
+- reject empty subscriptions and rule sets;
+- avoid secret leakage;
+- keep custom user rules across updates.
+
+## Security
+
+A subscription URL is a secret and may grant access to a VPN account.
+
+Rukiki must:
+
+- avoid logging full subscription URLs;
+- mask secrets in LuCI and diagnostics;
+- validate allowed URL schemes;
+- avoid shell interpolation of user input;
+- restrict access to configuration and RPC methods;
+- prevent subscription URLs from entering support archives;
+- limit download size and execution time;
+- avoid unsafe access to local or metadata endpoints.
+
+## Repository layout
+
+Important project paths:
+
+```text
+luci-app-rukiki/
+├── Makefile
+├── htdocs/
+├── root/
+│   ├── etc/config/rukiki
+│   ├── etc/rukiki/ucode/generate.uc
+│   ├── usr/libexec/rukiki/apply
+│   └── usr/share/rpcd/ucode/luci.rukiki
+└── po/
+
+tests/
+├── conftest.py
+├── dump.uc
+└── test_projection.py
+
+.github/workflows/
+└── rukiki-tests.yml
 ```
 
-## How To Use
+## Development
 
-See [Wiki](https://github.com/nikkinikki-org/OpenWrt-nikki/wiki)
+Run the projection tests through GitHub Actions.
 
-## How does it work
+The workflow:
 
-1. Mixin and Update profile.
-2. Run mihomo.
-3. Set scheduled restart.
-4. Set ip rule/route
-5. Generate nftables and apply it.
+1. builds the OpenWrt ucode toolchain;
+2. verifies the `uci`, `fs` and `ubus` modules;
+3. checks ucode syntax;
+4. runs the Python projection test suite.
 
-Note that the steps above may change base on config.
+Local macOS runs may be unavailable without a compatible ucode and OpenWrt library toolchain.
 
-## Compilation
+## Planned development stages
+
+### Stage 1: package build
+
+- include `luci-app-rukiki` in package workflows;
+- build an OpenWrt package for the target Flint 2 platform;
+- inspect package contents and dependencies.
+
+### Stage 2: router prototype
+
+- install on a test Flint 2;
+- verify LuCI rendering;
+- verify subscription processing;
+- verify generated groups and rules;
+- verify Nikki startup;
+- verify rollback.
+
+### Stage 3: rule distribution
+
+- create a separate list-aggregation pipeline;
+- normalize and validate sources;
+- build MRS artifacts;
+- publish versioned releases;
+- add safe updates on the router.
+
+### Stage 4: networking hardening
+
+- finalize DNS integration;
+- define IPv6 behaviour;
+- add health checks;
+- add watchdog and recovery;
+- add migration tests.
+
+### Stage 5: release
+
+- write installation and removal procedures;
+- publish signed packages;
+- add update and migration documentation;
+- test upgrades from earlier versions;
+- prepare a stable release channel.
+
+## Upstream synchronization
+
+This repository is a fork of the official Nikki project.
+
+Upstream:
+
+- [nikkinikki-org/OpenWrt-nikki](https://github.com/nikkinikki-org/OpenWrt-nikki)
+
+Rukiki-specific changes should remain isolated where possible so that upstream updates can be merged with minimal conflicts.
+
+Recommended remotes:
 
 ```shell
-# add feed
-echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >> "feeds.conf.default"
-# update & install feeds
-./scripts/feeds update -a
-./scripts/feeds install -a
-# make package
-make package/luci-app-nikki/compile
+git remote add upstream https://github.com/nikkinikki-org/OpenWrt-nikki.git
+git fetch upstream
 ```
 
-The package files will be found under `bin/packages/your_architecture/nikki`.
+Recommended synchronization:
 
-## Dependencies
+```shell
+git fetch upstream
+git checkout main
+git merge upstream/main
+git push origin main
+```
 
-- ca-bundle
-- curl
-- yq
-- firewall4
-- ip-full
-- kmod-inet-diag
-- kmod-nft-socket
-- kmod-nft-tproxy
-- kmod-tun
-- kmod-dummy
+Always run the Rukiki test workflow after synchronizing with upstream.
 
-## Contributors
+## Credits
 
-[![Contributors](https://contrib.rocks/image?repo=nikkinikki-org/OpenWrt-nikki)](https://github.com/nikkinikki-org/OpenWrt-nikki/graphs/contributors)
+Rukiki is based on the official Nikki project and uses Mihomo as the proxy core.
 
-## Special Thanks
+Thanks to the Nikki and Mihomo maintainers and contributors.
 
-- [@ApoisL](https://github.com/apoiston)
-- [@xishang0128](https://github.com/xishang0128)
+This repository is an independent experimental fork and is not an official Nikki release.
 
-## Recommended Proxy Provider
+## License
 
-Perfect Link is recommended
+Rukiki follows the license of the upstream Nikki repository.
 
-All route on IEPL, All exit node at Akari, reliable and easy to use
-
-[Official Website](https://perfectlink.io) | [Customer Service](https://t.me/PerfectlinksupportBot)
+See [LICENSE](LICENSE).
