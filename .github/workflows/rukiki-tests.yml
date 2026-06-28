@@ -10,12 +10,14 @@ on:
     paths:
       - 'luci-app-rukiki/**'
       - 'tests/**'
+      - '.github/workflows/rukiki-tests.yml'
   workflow_dispatch:
 
 jobs:
   generator-tests:
     name: generator projection tests
     runs-on: ubuntu-latest
+
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -25,51 +27,80 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /usr/local
-          key: ucode-toolchain-v1
+          key: ucode-toolchain-v2-ubus
 
-      - name: build ucode (libubox -> libuci -> ucode)
+      - name: build ucode toolchain
         if: steps.cache-ucode.outputs.cache-hit != 'true'
         run: |
-          set -e
+          set -euo pipefail
+
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential pkg-config \
-            libjson-c-dev git
-          work="$(mktemp -d)"; cd "$work"
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            git \
+            libjson-c-dev \
+            pkg-config
+
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          cd "$work"
 
           git clone --depth 1 https://git.openwrt.org/project/libubox.git
           cmake -S libubox -B libubox/build \
-            -DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF \
+            -DBUILD_LUA=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr/local
-          cmake --build libubox/build -j"$(nproc)"
+          cmake --build libubox/build --parallel "$(nproc)"
           sudo cmake --install libubox/build
           sudo ldconfig
 
           git clone --depth 1 https://git.openwrt.org/project/uci.git
           cmake -S uci -B uci/build \
             -DBUILD_LUA=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr/local \
             -DCMAKE_PREFIX_PATH=/usr/local
-          cmake --build uci/build -j"$(nproc)"
+          cmake --build uci/build --parallel "$(nproc)"
           sudo cmake --install uci/build
+          sudo ldconfig
+
+          git clone --depth 1 https://git.openwrt.org/project/ubus.git
+          cmake -S ubus -B ubus/build \
+            -DBUILD_LUA=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_PREFIX_PATH=/usr/local
+          cmake --build ubus/build --parallel "$(nproc)"
+          sudo cmake --install ubus/build
           sudo ldconfig
 
           git clone --depth 1 https://github.com/jow-/ucode.git
           cmake -S ucode -B ucode/build \
-            -DUCI_SUPPORT=ON -DFS_SUPPORT=ON -DMATH_SUPPORT=ON \
+            -DUCI_SUPPORT=ON \
+            -DUBUS_SUPPORT=ON \
+            -DFS_SUPPORT=ON \
+            -DMATH_SUPPORT=ON \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr/local \
             -DCMAKE_PREFIX_PATH=/usr/local
-          cmake --build ucode/build -j"$(nproc)"
+          cmake --build ucode/build --parallel "$(nproc)"
           sudo cmake --install ucode/build
           sudo ldconfig
 
-      - name: verify ucode + uci module
+      - name: verify ucode modules
         run: |
+          set -euo pipefail
           sudo ldconfig
           ucode -e 'print("ucode ready\n")'
           ucode -e 'import { cursor } from "uci"; print("uci module ready\n")'
+          ucode -e 'import * as fs from "fs"; print("fs module ready\n")'
+          ucode -e 'import { connect } from "ubus"; print("ubus module ready\n")'
 
       - name: syntax check
         run: |
+          set -euo pipefail
           ucode -c luci-app-rukiki/root/etc/rukiki/ucode/generate.uc
           ucode -c luci-app-rukiki/root/usr/share/rpcd/ucode/luci.rukiki
           ucode -c tests/dump.uc

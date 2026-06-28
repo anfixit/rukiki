@@ -6,7 +6,7 @@ PKG_LICENSE:=GPL-3.0-or-later
 PKG_MAINTAINER:=anfixit
 
 LUCI_TITLE:=Smart VPN (Rukiki) — simple mode over Nikki
-LUCI_DEPENDS:=+luci-base +nikki +ucode +ucode-mod-uci +ucode-mod-fs
+LUCI_DEPENDS:=+luci-base +nikki +ucode +ucode-mod-uci +ucode-mod-fs +ucode-mod-ubus
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
