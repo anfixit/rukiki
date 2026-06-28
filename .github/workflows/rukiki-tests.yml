@@ -20,24 +20,53 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: install ucode + uci modules
+      - name: cache ucode toolchain
+        id: cache-ucode
+        uses: actions/cache@v4
+        with:
+          path: /usr/local
+          key: ucode-toolchain-v1
+
+      - name: build ucode (libubox -> libuci -> ucode)
+        if: steps.cache-ucode.outputs.cache-hit != 'true'
         run: |
+          set -e
           sudo apt-get update
-          # ucode и модули (uci/fs) из репозитория Ubuntu
-          sudo apt-get install -y ucode ucode-modules || true
-          # fallback: собрать ucode из исходников, если пакета нет
-          if ! command -v ucode >/dev/null 2>&1; then
-            sudo apt-get install -y cmake build-essential \
-              libjson-c-dev libubox-dev libuci-dev
-            git clone https://github.com/jow-/ucode.git /tmp/ucode
-            cd /tmp/ucode
-            cmake -DCMAKE_BUILD_TYPE=Release \
-              -DUCI_SUPPORT=ON -DFS_SUPPORT=ON .
-            make -j"$(nproc)"
-            sudo make install
-            sudo ldconfig
-          fi
+          sudo apt-get install -y cmake build-essential pkg-config \
+            libjson-c-dev git
+          work="$(mktemp -d)"; cd "$work"
+
+          git clone --depth 1 https://git.openwrt.org/project/libubox.git
+          cmake -S libubox -B libubox/build \
+            -DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build libubox/build -j"$(nproc)"
+          sudo cmake --install libubox/build
+          sudo ldconfig
+
+          git clone --depth 1 https://git.openwrt.org/project/uci.git
+          cmake -S uci -B uci/build \
+            -DBUILD_LUA=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_PREFIX_PATH=/usr/local
+          cmake --build uci/build -j"$(nproc)"
+          sudo cmake --install uci/build
+          sudo ldconfig
+
+          git clone --depth 1 https://github.com/jow-/ucode.git
+          cmake -S ucode -B ucode/build \
+            -DUCI_SUPPORT=ON -DFS_SUPPORT=ON -DMATH_SUPPORT=ON \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_PREFIX_PATH=/usr/local
+          cmake --build ucode/build -j"$(nproc)"
+          sudo cmake --install ucode/build
+          sudo ldconfig
+
+      - name: verify ucode + uci module
+        run: |
+          sudo ldconfig
           ucode -e 'print("ucode ready\n")'
+          ucode -e 'import { cursor } from "uci"; print("uci module ready\n")'
 
       - name: syntax check
         run: |
