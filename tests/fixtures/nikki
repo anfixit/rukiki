@@ -1,0 +1,8 @@
+config config 'config'
+	option enabled '0'
+
+config mixin 'mixin'
+
+config proxy 'proxy'
+
+config subscription 'subscription'

@@ -1,0 +1,14 @@
+{
+    "admin/services/rukiki": {
+        "title": "Smart VPN",
+        "order": 5,
+        "action": {
+            "type": "view",
+            "path": "rukiki/home"
+        },
+        "depends": {
+            "acl": [ "luci-app-rukiki" ],
+            "uci": { "rukiki": true }
+        }
+    }
+}

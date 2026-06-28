@@ -1,0 +1,20 @@
+{
+    "luci-app-rukiki": {
+        "description": "Grant access to rukiki procedures",
+        "read": {
+            "uci": [ "rukiki", "nikki" ],
+            "ubus": {
+                "rc": [ "*" ],
+                "luci.rukiki": [ "*" ],
+                "luci.nikki": [ "*" ]
+            },
+            "file": {
+                "/var/run/rukiki/status.json": [ "read" ],
+                "/etc/nikki/mixin.yaml": [ "read" ]
+            }
+        },
+        "write": {
+            "uci": [ "rukiki", "nikki" ]
+        }
+    }
+}

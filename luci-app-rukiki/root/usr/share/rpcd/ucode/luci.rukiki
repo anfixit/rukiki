@@ -1,0 +1,108 @@
+#!/usr/bin/ucode
+// RPC-методы простого режима rukiki.
+// Запускается server-side с правами rpcd. Секрет (url подписки)
+// НИКОГДА не возвращается наружу.
+
+'use strict';
+
+import { cursor } from 'uci';
+import { connect } from 'ubus';
+import { open } from 'fs';
+
+const STATUS_FILE = '/var/run/rukiki/status.json';
+const APPLY = '/usr/libexec/rukiki/apply';
+const HEALTH_CHECK_URL = 'https://cp.cloudflare.com/generate_204';
+const HEALTH_CHECK_TIMEOUT = 5000;
+
+
+function read_json_file(path) {
+	const fd = open(path, 'r');
+	if (!fd)
+		return null;
+	const data = fd.read('all');
+	fd.close();
+	try {
+		return json(data);
+	} catch (e) {
+		return null;
+	}
+}
+
+
+function mihomo_running() {
+	// Дёшево: наличие процесса. Полный watchdog — Этап 5.
+	return system('pgrep -x mihomo >/dev/null 2>&1') == 0;
+}
+
+
+// Допускаем только http/https. Без shell-конкатенации с url.
+function valid_subscription_url(url) {
+	return type(url) == 'string' &&
+		(substr(url, 0, 7) == 'http://' || substr(url, 0, 8) == 'https://');
+}
+
+
+const methods = {
+	// Текущее состояние для дашборда. url не возвращается.
+	status: {
+		call: function() {
+			const uci = cursor();
+			const url = uci.get('rukiki', 'subscription', 'url');
+			const st = read_json_file(STATUS_FILE) || {};
+			st.service_running = mihomo_running();
+			st.subscription_set = valid_subscription_url(url);
+			return st;
+		}
+	},
+
+	// Генерация конфига Nikki из rukiki + мягкий reload с откатом.
+	apply: {
+		call: function() {
+			return { success: system(APPLY) == 0 };
+		}
+	},
+
+	// Проверка подписки: валидируем схему, прокидываем url в nikki,
+	// дёргаем штатное безопасное обновление Nikki. url не возвращаем.
+	check_subscription: {
+		call: function() {
+			const uci = cursor();
+			const url = uci.get('rukiki', 'subscription', 'url');
+			if (!valid_subscription_url(url))
+				return { success: false, error: 'invalid_url' };
+			const ua = uci.get('rukiki', 'subscription', 'user_agent')
+				?? 'clash.meta';
+			uci.set('nikki', 'subscription', 'url', url);
+			uci.set('nikki', 'subscription', 'user_agent', ua);
+			uci.set('nikki', 'subscription', 'prefer', 'remote');
+			uci.commit('nikki');
+			const ok = system(
+				['service', 'nikki', 'update_subscription', 'subscription']
+			) == 0;
+			return { success: ok };
+		}
+	},
+
+	// Тест VPN: задержки нод группы AUTO через безопасный API Nikki.
+	test_vpn: {
+		call: function() {
+			const ubus = connect();
+			const res = ubus.call('luci.nikki', 'api', {
+				method: 'GET',
+				path: '/group/AUTO/delay',
+				query: `url=${HEALTH_CHECK_URL}&timeout=${HEALTH_CHECK_TIMEOUT}`,
+				body: ''
+			});
+			return { running: mihomo_running(), delays: res ?? {} };
+		}
+	},
+
+	// Обновить списки маршрутизации (перечитать rule-providers).
+	update_lists: {
+		call: function() {
+			return { success: system(['service', 'nikki', 'reload']) == 0 };
+		}
+	}
+};
+
+return { 'luci.rukiki': methods };

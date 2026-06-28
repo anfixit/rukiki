@@ -1,0 +1,53 @@
+name: rukiki-tests
+
+on:
+  push:
+    paths:
+      - 'luci-app-rukiki/**'
+      - 'tests/**'
+      - '.github/workflows/rukiki-tests.yml'
+  pull_request:
+    paths:
+      - 'luci-app-rukiki/**'
+      - 'tests/**'
+  workflow_dispatch:
+
+jobs:
+  generator-tests:
+    name: generator projection tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install ucode + uci modules
+        run: |
+          sudo apt-get update
+          # ucode и модули (uci/fs) из репозитория Ubuntu
+          sudo apt-get install -y ucode ucode-modules || true
+          # fallback: собрать ucode из исходников, если пакета нет
+          if ! command -v ucode >/dev/null 2>&1; then
+            sudo apt-get install -y cmake build-essential \
+              libjson-c-dev libubox-dev libuci-dev
+            git clone https://github.com/jow-/ucode.git /tmp/ucode
+            cd /tmp/ucode
+            cmake -DCMAKE_BUILD_TYPE=Release \
+              -DUCI_SUPPORT=ON -DFS_SUPPORT=ON .
+            make -j"$(nproc)"
+            sudo make install
+            sudo ldconfig
+          fi
+          ucode -e 'print("ucode ready\n")'
+
+      - name: syntax check
+        run: |
+          ucode -c luci-app-rukiki/root/etc/rukiki/ucode/generate.uc
+          ucode -c luci-app-rukiki/root/usr/share/rpcd/ucode/luci.rukiki
+          ucode -c tests/dump.uc
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: run generator tests
+        working-directory: tests
+        run: uv run --with pytest --with pyyaml pytest -v

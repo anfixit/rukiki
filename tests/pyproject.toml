@@ -1,0 +1,16 @@
+[project]
+name = "rukiki-tests"
+version = "0.1.0"
+description = "Тесты генератора rukiki (проекция rukiki -> nikki)"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8", "pyyaml>=6"]
+
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["."]

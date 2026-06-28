@@ -1,0 +1,214 @@
+# /etc/config/rukiki
+#
+# Источник правды "простого режима" (страница LuCI "Умный VPN").
+# Пользователь и фронтенд редактируют ТОЛЬКО этот конфиг.
+#
+# Генератор rukiki-gen проецирует его в:
+#   * UCI 'nikki'              — subscription, @rule[], @rule_provider[],
+#                                mixin-флаги (rule, rule_provider, DNS, fake-ip);
+#   * /etc/nikki/mixin.yaml    — proxy-groups PROXY / AUTO / MANUAL.
+#
+# Владелец итогового /etc/nikki/run/config.yaml — ВСЕГДА Nikki.
+# Этот конфиг ничего не запускает сам; он описывает намерение.
+#
+# Инварианты порядка правил (local DIRECT, финальный MATCH DIRECT)
+# здесь НЕ хранятся — их всегда эмитит генератор, чтобы критический
+# порядок нельзя было сломать вручную.
+#
+# Состояние (статус сервиса, текущая нода, задержки, таймстемпы)
+# здесь НЕ хранится — это рантайм-кэш /var/run/rukiki/status.json,
+# отдаваемый через ubus. Намерение и состояние — разные слои.
+
+
+# === Глобальные намерения =====================================
+config rukiki 'main'
+	option enabled '0'
+	# Основная группа PROXY ссылается на:
+	#   auto   -> AUTO   (url-test, авто-выбор лучшей ноды)
+	#   manual -> MANUAL (select, ручной выбор)
+	option mode 'auto'
+	# fail-open: трафик, не покрытый правилами, идёт DIRECT.
+	# fail-closed оставлен только как расширенная настройка.
+	option fail_mode 'open'
+	option auto_best_server '1'
+	option auto_failover '1'
+	# Системные роли наборов (см. секции ruleset ниже):
+	option bypass_blocks '1'
+	option ru_direct '1'
+	option auto_update_lists '1'
+
+
+# === Подписка (СЕКРЕТ) ========================================
+# url — секрет: маскируется в UI и диагностике, не пишется в логи,
+# права на файл конфига ограничены. Проецируется в nikki.subscription.
+config subscription 'subscription'
+	option url ''
+	option user_agent 'clash.meta'
+	option auto_update '1'
+	option update_interval '86400'
+
+
+# === DNS-профиль ==============================================
+# Проецируется в mixin-флаги Nikki. Профиль "устойчивый, а не сложный":
+# локальные имена остаются у dnsmasq, внешние — у Mihomo DNS.
+config dns 'dns'
+	option enhanced_mode 'fake-ip'
+	# bootstrap разрешает адреса VPN-серверов без циклической зависимости
+	list bootstrap '9.9.9.9'
+	list bootstrap '77.88.8.8'
+	# DoH для прямого (RU) трафика
+	option direct_resolver 'https://77.88.8.8/dns-query'
+	# DoH для проксируемого трафика
+	option proxy_resolver 'https://1.1.1.1/dns-query'
+	# В первой версии IPv6 управляемо выключен, чтобы избежать утечек
+	# в обход правил. Поддержку включим осознанно позже.
+	option ipv6 '0'
+
+
+# === Безопасность =============================================
+config security 'security'
+	option mask_subscription_url '1'
+	option yacd_wan_access '0'
+
+
+# === Скачиваемые наборы (rule-providers) ======================
+# Каждый ruleset -> один nikki.rule_provider + одно правило.
+# role задаёт позицию в порядке правил (фиксируется генератором):
+#   allowlist < blocked < geoblock < service < ru_ip.
+# url всегда указывает на НАШ Release/CDN (мы владеем URL);
+# mirror_url — резервный источник на случай недоступности.
+# behavior: domain | ipcidr.  action: direct | proxy.
+
+# --- Системные роли (управляются тумблерами main) ---
+
+# Российский allowlist (банки/госуслуги/платёжные): hard-DIRECT.
+# Этот набор собирается с вычитанием из всех proxy-наборов,
+# поэтому домен из него физически не может уйти в VPN.
+config ruleset 'allowlist'
+	option enabled '1'
+	option role 'allowlist'
+	option behavior 'domain'
+	option action 'direct'
+	option url ''
+	option mirror_url ''
+	option interval '86400'
+
+# Заблокированные в РФ — домены (основа: itdoginfo + Re:filter/runetfreedom)
+config ruleset 'blocked'
+	option enabled '1'
+	option role 'blocked'
+	option behavior 'domain'
+	option action 'proxy'
+	option url ''
+	option mirror_url ''
+	option interval '86400'
+
+# Заблокированные в РФ — IP-сети
+config ruleset 'blocked_ip'
+	option enabled '1'
+	option role 'blocked'
+	option behavior 'ipcidr'
+	option action 'proxy'
+	option url ''
+	option mirror_url ''
+	option interval '86400'
+
+# Недоступные из РФ (режут российский IP): GeoBlock / Russia-outside
+config ruleset 'geoblock'
+	option enabled '1'
+	option role 'geoblock'
+	option behavior 'domain'
+	option action 'proxy'
+	option url ''
+	option mirror_url ''
+	option interval '86400'
+
+# Российские IP-сети -> DIRECT (шаг 8 порядка). Явный набор, чтобы
+# источник geoip был виден и заменяем (наше зеркало geoip-ru).
+# Управляется тумблером main.ru_direct.
+config ruleset 'ru_ip'
+	option enabled '1'
+	option role 'ru_ip'
+	option behavior 'ipcidr'
+	option action 'direct'
+	option url ''
+	option mirror_url ''
+	option interval '86400'
+
+# --- Сервисные роли (галочки категорий в UI) ---
+
+config ruleset 'youtube'
+	option enabled '1'
+	option role 'service'
+	option behavior 'domain'
+	option action 'proxy'
+	option url ''
+	option interval '86400'
+
+config ruleset 'discord'
+	option enabled '1'
+	option role 'service'
+	option behavior 'domain'
+	option action 'proxy'
+	option url ''
+	option interval '86400'
+
+# Discord voice — отдельный IP-набор
+config ruleset 'discord_ip'
+	option enabled '1'
+	option role 'service'
+	option behavior 'ipcidr'
+	option action 'proxy'
+	option url ''
+	option interval '86400'
+
+config ruleset 'social'
+	option enabled '1'
+	option role 'service'
+	option behavior 'domain'
+	option action 'proxy'
+	option url ''
+	option interval '86400'
+
+config ruleset 'ai'
+	option enabled '1'
+	option role 'service'
+	option behavior 'domain'
+	option action 'proxy'
+	option url ''
+	option interval '86400'
+
+config ruleset 'media'
+	option enabled '1'
+	option role 'service'
+	option behavior 'domain'
+	option action 'proxy'
+	option url ''
+	option interval '86400'
+
+config ruleset 'gaming'
+	option enabled '1'
+	option role 'service'
+	option behavior 'domain'
+	option action 'proxy'
+	option url ''
+	option interval '86400'
+
+
+# === Пользовательские правила =================================
+# Высший приоритет; переживают обновления списков (хранятся здесь,
+# а не в скачиваемых наборах). Генератор кладёт их ПЕРВЫМИ.
+#   action: vpn    -> правило ...,PROXY  (prepend)
+#           direct -> правило ...,DIRECT (prepend)
+#           auto   -> правило НЕ создаётся (решают автосписки)
+#
+# Примеры (по умолчанию правил нет):
+# config rule
+#	option enabled '1'
+#	option domain 'youtube.com'
+#	option action 'vpn'
+#
+# config rule
+#	option enabled '1'
+#	option domain 'gosuslugi.ru'
+#	option action 'direct'

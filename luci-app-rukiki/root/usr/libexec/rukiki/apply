@@ -1,0 +1,39 @@
+#!/bin/sh
+# rukiki apply: генерируем конфиг Nikki из rukiki и мягко перезагружаем.
+# При неудаче — откат к предыдущему рабочему состоянию.
+set -u
+
+GEN=/etc/rukiki/ucode/generate.uc
+MIXIN=/etc/nikki/mixin.yaml
+NIKKI_UCI=/etc/config/nikki
+BK=/tmp/rukiki-rollback
+
+log() { logger -t rukiki "$*"; }
+
+# 1. Снимок текущего рабочего состояния.
+rm -rf "$BK"; mkdir -p "$BK"
+cp -f "$NIKKI_UCI" "$BK/nikki.uci" 2>/dev/null || true
+cp -f "$MIXIN"     "$BK/mixin.yaml" 2>/dev/null || true
+
+# 2. Проекция rukiki -> nikki UCI + mixin.yaml.
+if ! ucode "$GEN"; then
+	log "generate failed; aborting apply"
+	exit 1
+fi
+
+# 3. Мягкий перезапуск Nikki (он сам делает mihomo -t перед стартом).
+service nikki reload >/dev/null 2>&1
+
+# 4. Проверка: если включено, mihomo должен быть жив.
+enabled="$(uci -q get nikki.config.enabled || echo 0)"
+sleep 2
+if [ "$enabled" = "1" ] && ! pgrep -x mihomo >/dev/null 2>&1; then
+	log "mihomo down after reload; rolling back"
+	[ -f "$BK/nikki.uci" ]  && cp -f "$BK/nikki.uci"  "$NIKKI_UCI"
+	[ -f "$BK/mixin.yaml" ] && cp -f "$BK/mixin.yaml" "$MIXIN"
+	service nikki reload >/dev/null 2>&1
+	exit 2
+fi
+
+log "apply ok"
+exit 0
