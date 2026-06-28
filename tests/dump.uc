@@ -5,7 +5,8 @@
 import { cursor } from 'uci';
 
 const dir = getenv('RUKIKI_UCI_DIR');
-const uci = dir ? cursor(dir, dir) : cursor();
+const savedir = getenv('RUKIKI_UCI_SAVEDIR');
+const uci = dir ? cursor(dir, savedir || dir) : cursor();
 uci.load('nikki');
 
 const out = {

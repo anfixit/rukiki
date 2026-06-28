@@ -305,7 +305,10 @@ function write_app_and_proxy(uci, main) {
 
 function main() {
 	const test_dir = getenv('RUKIKI_UCI_DIR');
-	const uci = test_dir ? cursor(test_dir, test_dir) : cursor();
+	const test_savedir = getenv('RUKIKI_UCI_SAVEDIR');
+	const uci = test_dir
+		? cursor(test_dir, test_savedir || test_dir)
+		: cursor();
 	uci.load('rukiki');
 	uci.load('nikki');
 
